@@ -1,0 +1,27 @@
+# python
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# virtual enviroment
+.venv/
+venv/
+.pyenv/
+
+.env
+
+*.log
+
+*.tmp
+*.bak
+*.swp
+
+.DS_Store
+
+uploads/
+outputs/
+data/
+
+.idea/
+.vscode/
