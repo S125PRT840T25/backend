@@ -1,5 +1,5 @@
 from flask import Flask, request, jsonify, send_from_directory, render_template
-from services.classification import ClassificationService
+from services.classification import ClassificationService, classify_comments
 from utils.config import Config
 from services.classification import celery
 
@@ -28,7 +28,7 @@ def upload_file():
 
     file_path = file_service.save_uploaded_file(file)
     try:
-        task = classification_service.classify_comments.delay(file_path)
+        task = classify_comments.delay(file_path)
         return jsonify({"task_id": task.id}), 202
     except Exception as e:
         if app.debug: raise e 
@@ -36,7 +36,7 @@ def upload_file():
 
 @app.route('/api/task/<task_id>', methods=['GET'])
 def get_task_status(task_id):
-    task = classification_service.classify_comments.AsyncResult(task_id)
+    task = classify_comments.AsyncResult(task_id)
     if task.state == 'PENDING':
         return jsonify({"status": 'Pending'}), 202
     elif task.state == 'SUCCESS':
