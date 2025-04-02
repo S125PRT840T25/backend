@@ -8,6 +8,7 @@
 .venv/
 venv/
 .pyenv/
+.python-version
 
 .env
 
