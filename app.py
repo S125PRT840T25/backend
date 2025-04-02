@@ -1,55 +1,73 @@
 from flask import Flask, request, jsonify, send_from_directory, render_template
-from services.classification import ClassificationService, classify_comments
+from services.classification import ClassificationService, celery, classify_comments
 from utils.config import Config
-from services.classification import celery
+import os, uuid
+from pathlib import Path
+
 
 app = Flask(__name__)
-app.config['MAX_CONTENT_LENGTH'] = Config.MAX_CONTENT_LENGTH
-app.config['UPLOAD_FOLDER'] = Config.UPLOAD_FOLDER
-app.config['OUTPUT_FOLDER'] = Config.OUTPUT_FOLDER
+app.config["MAX_CONTENT_LENGTH"] = Config.MAX_CONTENT_LENGTH
 
 # init service
 classification_service = ClassificationService()
 file_service = classification_service.file_service
 
-@app.route('/')
+
+@app.route("/")
 def index():
-    return render_template('index.html')
+    return render_template("index.html")
 
-@app.route('/api/upload', methods=['POST'])
+
+@app.route("/api/upload", methods=["POST"])
 def upload_file():
-    if 'file' not in request.files:
+    if "file" not in request.files:
         return jsonify({"error": "No file part"}), 400
-    file = request.files['file']
-    if file.filename == '':
+    file = request.files["file"]
+    if file.filename == "":
         return jsonify({"error": "No selected file"}), 400
-    if not file.filename.lower().endswith('.csv'):
-        return jsonify({"error": 'File must be a CSV'}), 400
+    if not file.filename.lower().endswith(".csv"):
+        return jsonify({"error": "File must be a CSV"}), 400
 
-    file_path = file_service.save_uploaded_file(file)
     try:
-        task = classify_comments.delay(file_path)
+        file_path, unique_id = file_service.save_uploaded_file(file)
+        task = classify_comments.delay(unique_id, file.filename)
         return jsonify({"task_id": task.id}), 202
     except Exception as e:
-        if app.debug: raise e 
-        else: return jsonify({"error": str(e)}), 400
+        app.logger.error(f"error: {str(e)}")
+        if app.debug:
+            raise e
+        else:
+            return jsonify({"error": "Internal server error."}), 400
 
-@app.route('/api/task/<task_id>', methods=['GET'])
+
+@app.route("/api/task/<task_id>", methods=["GET"])
 def get_task_status(task_id):
     task = classify_comments.AsyncResult(task_id)
-    if task.state == 'PENDING':
-        return jsonify({"status": 'Pending'}), 202
-    elif task.state == 'SUCCESS':
-        return jsonify({
-            'status': 'Success',
-            'download_url': f"/api/download/{task.result}"
-        }), 200
+    if task.state == "PENDING":
+        return jsonify({"status": "Pending"}), 202
+    elif task.state == "SUCCESS":
+        return (
+            jsonify(
+                {"status": "Success", "download_url": f"/api/download/{task.result}"}
+            ),
+            200,
+        )
     else:
-        return jsonify({'status': task.state}), 500
+        return jsonify({"status": task.state}), 500
 
-@app.route('/api/download/<filename>', methods=['GET'])
+
+@app.route("/api/download/<filename>", methods=["GET"])
 def download_file(filename):
-    return send_from_directory(app.config['OUTPUT_FOLDER'], filename, as_attachment=True)
+    original_filename = file_service.get_original_filename(filename)
+    if not original_filename:
+        return jsonify({"error": "File not found"}), 404
+    return send_from_directory(
+        Config.OUTPUT_FOLDER,
+        filename,
+        as_attachment=True,
+        download_name=f"processed_{original_filename}",
+    )
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     app.run(debug=True)

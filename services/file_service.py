@@ -1,6 +1,8 @@
 import os
 import pandas as pd
 from werkzeug.utils import secure_filename
+import uuid
+
 
 class FileService:
     def __init__(self, upload_folder, output_folder):
@@ -8,21 +10,29 @@ class FileService:
         self.output_folder = output_folder
         os.makedirs(upload_folder, exist_ok=True)
         os.makedirs(output_folder, exist_ok=True)
+        self.filename_mapping = {}
 
     def save_uploaded_file(self, file):
-        filename = secure_filename(file.filename)
-        file_path = os.path.join(self.upload_folder, filename)
+        original_filename = secure_filename(file.filename)
+        unique_id = str(uuid.uuid4())
+        stored_filename = f"{unique_id}"
+        file_path = os.path.join(self.upload_folder, stored_filename)
         file.save(file_path)
-        return file_path
+        self.filename_mapping[unique_id] = original_filename
+        return file_path, unique_id
 
     def read_comments(self, file_path):
         df = pd.read_csv(file_path)
-        if 'comment' not in df.columns:
+        if "comment" not in df.columns:
             raise ValueError("CSV must have a 'comment' column")
-        return df['comment'].tolist()
+        return df["comment"].tolist()
 
-    def save_classified_data(self, data, output_filename='classified.csv'):
-        df = pd.DataFrame(data)
+    def save_classified_data(self, data, unique_id, original_filename):
+        output_filename = f"{unique_id}"
         output_path = os.path.join(self.output_folder, output_filename)
+        df = pd.DataFrame(data)
         df.to_csv(output_path, index=False)
-        return output_path
+        return output_path, output_filename
+
+    def get_original_filename(self, unique_id):
+        return self.filename_mapping.get(unique_id, None)
