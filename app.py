@@ -1,43 +1,55 @@
-from flask import Flask, request, send_file, render_template
+from flask import Flask, request, jsonify, send_from_directory, render_template
 from services.classification import ClassificationService
 from utils.config import Config
-import os
+from services.classification import celery
 
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = Config.MAX_CONTENT_LENGTH
+app.config['UPLOAD_FOLDER'] = Config.UPLOAD_FOLDER
+app.config['OUTPUT_FOLDER'] = Config.OUTPUT_FOLDER
 
 # init service
-classification_service = ClassificationService(
-    Config.UPLOAD_FOLDER,
-    Config.OUTPUT_FOLDER
-)
+classification_service = ClassificationService()
+file_service = classification_service.file_service
 
 @app.route('/')
 def index():
     return render_template('index.html')
 
-@app.route('/upload', methods=['POST'])
+@app.route('/api/upload', methods=['POST'])
 def upload_file():
     if 'file' not in request.files:
-        return "No file part", 400
+        return jsonify({"error": "No file part"}), 400
     file = request.files['file']
     if file.filename == '':
-        return "No selected file", 400
+        return jsonify({"error": "No selected file"}), 400
     if not file.filename.lower().endswith('.csv'):
-        return 'File must be a CSV', 400
+        return jsonify({"error": 'File must be a CSV'}), 400
 
+    file_path = file_service.save_uploaded_file(file)
     try:
-        output_path = classification_service.classify_comments(file)
-        return f"File classified successfully. Download from <a href=\"/download/{os.path.basename(output_path)}\">here</a>.", 200
+        task = classification_service.classify_comments.delay(file_path)
+        return jsonify({"task_id": task.id}), 202
     except Exception as e:
-        print(e)
-        raise e
-        return f"Error: {str(e)}", 400
+        if app.debug: raise e 
+        else: return jsonify({"error": str(e)}), 400
 
-@app.route('/download/<filename>', methods=['GET'])
+@app.route('/api/task/<task_id>', methods=['GET'])
+def get_task_status(task_id):
+    task = classification_service.classify_comments.AsyncResult(task_id)
+    if task.state == 'PENDING':
+        return jsonify({"status": 'Pending'}), 202
+    elif task.state == 'SUCCESS':
+        return jsonify({
+            'status': 'Success',
+            'download_url': f"/api/download/{task.result}"
+        }), 200
+    else:
+        return jsonify({'status': task.state}), 500
+
+@app.route('/api/download/<filename>', methods=['GET'])
 def download_file(filename):
-    file_path = os.path.join(Config.OUTPUT_FOLDER, filename)
-    return send_file(file_path, as_attachment=True)
+    return send_from_directory(app.config['OUTPUT_FOLDER'], filename, as_attachment=True)
 
 if __name__ == '__main__':
     app.run(debug=True)
