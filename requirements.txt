@@ -1,6 +1,7 @@
 celery==5.5.0
 Flask==3.1.0
 pandas==2.2.3
+python-dotenv==1.1.0
 torch==2.6.0
 transformers==4.50.3
 Werkzeug==3.1.3

@@ -1,9 +1,6 @@
 from flask import Flask, request, jsonify, send_from_directory, render_template
 from services.classification import ClassificationService, celery, classify_comments
 from utils.config import Config
-import os, uuid
-from pathlib import Path
-
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = Config.MAX_CONTENT_LENGTH
@@ -70,4 +67,4 @@ def download_file(filename):
 
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    app.run(debug=Config.DEBUG)
