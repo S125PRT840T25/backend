@@ -1,5 +1,5 @@
 ### Requirements
 
-```python 
-pip install flask transformers torch pandas celery redis
+```python
+pip install flask flask-cors transformers torch pandas celery redis
 ```

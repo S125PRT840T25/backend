@@ -1,8 +1,11 @@
 from flask import Flask, request, jsonify, send_from_directory, render_template
+from flask_cors import CORS
 from services.classification import ClassificationService, celery, classify_comments
 from utils.config import Config
 
 app = Flask(__name__)
+# enable cors
+CORS(app)
 app.config["MAX_CONTENT_LENGTH"] = Config.MAX_CONTENT_LENGTH
 
 # init service
