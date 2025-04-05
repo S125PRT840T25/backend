@@ -48,7 +48,7 @@ def get_task_status(task_id):
     elif task.state == "SUCCESS":
         return (
             jsonify(
-                {"status": "Success", "download_url": f"/api/download/{task.result}"}
+                {"task_id": task_id, "status": "Success", "download_url": f"/api/download/{task.result}"}
             ),
             200,
         )
