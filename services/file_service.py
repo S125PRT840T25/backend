@@ -55,4 +55,7 @@ class FileService:
             os.remove(output_file)
 
     def get_state(self, unique_id):
-        self.db_service.get_file_state(unique_id)
+        return self.db_service.get_file_state(unique_id)
+
+    def set_state(self, u_id, state):
+        self.db_service.update_file_state(u_id, state)
