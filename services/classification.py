@@ -26,7 +26,7 @@ def classify_comments(unique_id, original_filename, classification_types=["senti
     comments = file_service.read_comments(file_path)
 
     classified_data = []
-    for comment in comments:
+    for idx, comment in enumerate(comments):
         result = {"comment": comment}
 
         if "sentiment" in classification_types:
