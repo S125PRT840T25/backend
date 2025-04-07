@@ -7,6 +7,7 @@ app = Flask(__name__)
 # enable cors
 CORS(app)
 app.config["MAX_CONTENT_LENGTH"] = Config.MAX_CONTENT_LENGTH
+app.debug = Config.DEBUG
 
 # init service
 classification_service = ClassificationService()
@@ -40,24 +41,39 @@ def upload_file():
             return jsonify({"error": "Internal server error."}), 400
 
 
-@app.route("/api/task/<task_id>", methods=["GET"])
-def get_task_status(task_id):
-    task = classification_task.AsyncResult(task_id)
-    if task.state == "PENDING":
-        return jsonify({"status": "Pending"}), 202
-    elif task.state == "SUCCESS":
+@app.route("/api/task/<id>", methods=["GET"])
+def get_task_status(id):
+    state = file_service.get_state(id)
+    if not state:
+        return jsonify({"status": "Invalid"}), 404
+    if state == 3:
         return (
             jsonify(
                 {
-                    "task_id": task_id,
                     "status": "Success",
-                    "download_url": f"/api/download/{task.result}",
+                    "download_url": f"/api/download/{id}",
                 }
             ),
             200,
         )
+    elif state == 1:
+        return jsonify({"status": "Pending"}), 202
+    task = classification_task.AsyncResult(id)
+    if task.state == "PENDING":
+        return jsonify({"status": "Pending"}), 202
+    elif task.state == "PROCESSING":
+        return (
+            jsonify(
+                {
+                    "status": "Processing",
+                    "current": task.info.get("current", 0),
+                    "total": task.info.get("total", 0),
+                }
+            ),
+            202,
+        )
     else:
-        return jsonify({"status": task.state}), 500
+        return jsonify({"status": task.state, "info": task.info}), 202
 
 
 @app.route("/api/download/<id>", methods=["GET"])
@@ -74,4 +90,4 @@ def download_file(id):
 
 
 if __name__ == "__main__":
-    app.run(debug=Config.DEBUG)
+    app.run()

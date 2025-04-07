@@ -14,35 +14,105 @@ class DBService:
         self.conn = conn
         # check version
         cursor = conn.cursor()
-        cursor.execute(
+        cursor.executescript(
             """
             CREATE TABLE IF NOT EXISTS schema_version (
                 id INTEGER PRIMARY KEY CHECK (id = 1),  -- Ensure only one row
                 version INTEGER NOT NULL
-            )
+            );
+            INSERT OR IGNORE INTO schema_version (id, version) VALUES (1, 0);
+            PRAGMA foreign_keys = ON;
             """
-        )
-        cursor.execute(
-            "INSERT OR IGNORE INTO schema_version (id, version) VALUES (1, 0)"
         )
         conn.commit()
         version = self.get_current_version()
-        if version < 1:
-            self.migrate_to_v1()
+        if version == 0:
+            self.create_tables()
+        else:
+            # if version < 1:
+            #     self.migrate_to_v1()
+            if version < 2:
+                self.migrate_to_v2()
 
-    def migrate_to_v1(self):
+    def create_tables(self):
         cursor = self.conn.cursor()
-        cursor.execute(
+        cursor.executescript(
             """
+            -- create the lookup table
+            CREATE TABLE IF NOT EXISTS states (
+                state_id INTEGER PRIMARY KEY,
+                state_name TEXT UNIQUE
+            );
+            
+            -- insert allowed values
+            INSERT INTO states (state_name) VALUES ('pending');
+            INSERT INTO states (state_name) VALUES ('processing');
+            INSERT INTO states (state_name) VALUES ('success');
+            
+            -- create main table
             CREATE TABLE IF NOT EXISTS file_records (
                 u_id TEXT PRIMARY KEY,
                 filename TEXT,
-                upload_time REAL
-            )
+                upload_time REAL,
+                size INTEGER,
+                state_id INTEGER,
+                FOREIGN KEY (state_id) REFERENCES states(state_id)
+            );
             """
         )
-        cursor.execute("UPDATE schema_version SET version = 1 WHERE id = 1")
+        cursor.execute("UPDATE schema_version SET version = 2 WHERE id = 1")
         self.conn.commit()
+
+    # def migrate_to_v1(self):
+    #     cursor = self.conn.cursor()
+    #     cursor.execute(
+    #         """
+    #         CREATE TABLE IF NOT EXISTS file_records (
+    #             u_id TEXT PRIMARY KEY,
+    #             filename TEXT,
+    #             upload_time REAL
+    #         )
+    #         """
+    #     )
+    #     cursor.execute("UPDATE schema_version SET version = 1 WHERE id = 1")
+    #     self.conn.commit()
+
+    def migrate_to_v2(self):
+        cursor = self.conn.cursor()
+        cursor.executescript(
+            """
+            -- create the lookup table
+            CREATE TABLE IF NOT EXISTS states (
+                state_id INTEGER PRIMARY KEY,
+                state_name TEXT UNIQUE
+            );
+            
+            -- insert allowed values
+            INSERT INTO states (state_name) VALUES ('pending');
+            INSERT INTO states (state_name) VALUES ('processing');
+            INSERT INTO states (state_name) VALUES ('success');
+            
+            -- create new temporary main table
+            CREATE TABLE file_records_new (
+                u_id TEXT PRIMARY KEY,
+                filename TEXT,
+                upload_time REAL,
+                size INTEGER,
+                state_id INTEGER,
+                FOREIGN KEY (state_id) REFERENCES states(state_id)
+            );
+            -- copy data from old table
+            INSERT INTO file_records_new (u_id, filename, upload_time, state_id)
+            SELECT u_id, filename, upload_time, 3 from file_records;
+            -- drop old table
+            DROP TABLE file_records;
+            -- rename temp table
+            ALTER TABLE file_records_new RENAME TO file_records;
+            """
+        )
+        cursor.execute("UPDATE schema_version SET version = 2 WHERE id = 1")
+        self.conn.commit()
+        cursor.close()
 
     def get_current_version(self):
         cursor = self.conn.cursor()
@@ -51,15 +121,15 @@ class DBService:
         cursor.close()
         return version
 
-    def save_file_record(self, u_id, filename):
+    def save_file_record(self, u_id, filename, size):
         """Save a file's metadata in the database."""
         cursor = self.conn.cursor()
         cursor.execute(
             """
-            INSERT OR REPLACE INTO file_records (u_id, filename, upload_time)
-            VALUES (?, ?, ?)
+            INSERT OR REPLACE INTO file_records (u_id, filename, upload_time, state_id, size)
+            VALUES (?, ?, ?, ?, ?)
             """,
-            (u_id, filename, time.time()),
+            (u_id, filename, time.time(), 1, size),
         )
         self.conn.commit()
 
@@ -73,6 +143,24 @@ class DBService:
         result = cursor.fetchone()
         cursor.close()
         return result[0] if result else None
+
+    def get_file_state(self, u_id):
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "SELECT state_id FROM file_records WHERE u_id = ?",
+            (u_id,),
+        )
+        result = cursor.fetchone()
+        cursor.close()
+        return result[0] if result else None
+
+    def update_file_state(self, u_id, state):
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "UPDATE file_records SET state_id = ? WHERE u_id = ?",
+            (state, u_id),
+        )
+        self.conn.commit()
 
     def close(self):
         self.conn.close()
