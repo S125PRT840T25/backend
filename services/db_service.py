@@ -45,9 +45,10 @@ class DBService:
             );
             
             -- insert allowed values
-            INSERT INTO states (state_name) VALUES ('pending');
-            INSERT INTO states (state_name) VALUES ('processing');
-            INSERT INTO states (state_name) VALUES ('success');
+            INSERT OR IGNORE INTO states (state_name) VALUES 
+                ('pending'),
+                ('processing'),
+                ('success');
             
             -- create main table
             CREATE TABLE IF NOT EXISTS file_records (
@@ -88,9 +89,10 @@ class DBService:
             );
             
             -- insert allowed values
-            INSERT INTO states (state_name) VALUES ('pending');
-            INSERT INTO states (state_name) VALUES ('processing');
-            INSERT INTO states (state_name) VALUES ('success');
+            INSERT OR IGNORE INTO states (state_name) VALUES 
+                ('pending'),
+                ('processing'),
+                ('success');
             
             -- create new temporary main table
             CREATE TABLE file_records_new (
@@ -147,7 +149,8 @@ class DBService:
     def get_file_state(self, u_id):
         cursor = self.conn.cursor()
         cursor.execute(
-            "SELECT state_id FROM file_records WHERE u_id = ?",
+            """SELECT states.state_name FROM states INNER JOIN file_records 
+                ON states.state_id=file_records.state_id AND file_records.u_id = ?""",
             (u_id,),
         )
         result = cursor.fetchone()
@@ -156,10 +159,18 @@ class DBService:
 
     def update_file_state(self, u_id, state):
         cursor = self.conn.cursor()
-        cursor.execute(
-            "UPDATE file_records SET state_id = ? WHERE u_id = ?",
-            (state, u_id),
-        )
+        cursor.execute("SELECT state_id FROM states WHERE state_name = ?", (state,))
+        result = cursor.fetchone()
+        if result:
+            cursor.execute(
+                "UPDATE file_records SET state_id = ? WHERE u_id = ?",
+                (result[0], u_id),
+            )
+        self.conn.commit()
+
+    def delete_record(self, u_id):
+        cursor = self.conn.cursor()
+        cursor.execute("DELETE FROM file_records WHERE u_id = ?", (u_id,))
         self.conn.commit()
 
     def close(self):
