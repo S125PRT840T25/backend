@@ -46,7 +46,7 @@ def get_task_status(id):
     state = file_service.get_state(id)
     if not state:
         return jsonify({"status": "Invalid"}), 404
-    if state == 'success':
+    if state == "success":
         return (
             jsonify(
                 {
@@ -56,7 +56,7 @@ def get_task_status(id):
             ),
             200,
         )
-    elif state == 'pending':
+    elif state == "pending":
         return jsonify({"status": "Pending"}), 202
     task = classification_task.AsyncResult(id)
     if task.state == "PENDING":
@@ -73,7 +73,10 @@ def get_task_status(id):
             202,
         )
     else:
-        return jsonify({"status": task.state, "info": task.info}), 202
+        result = {"status": str(task.state)}
+        if app.debug:
+            result["info"] = str(task.info)
+        return jsonify(result), 202
 
 
 @app.route("/api/download/<id>", methods=["GET"])
