@@ -17,16 +17,18 @@ class ClassificationService:
 
 
 @celery.task
-def classify_comments(unique_id, original_filename, classification_types=["sentiment"]):
-    file_service = FileService(Config.UPLOAD_FOLDER, Config.OUTPUT_FOLDER)
-    sentiment_model = SentimentModel(Config.MODEL_PATH, Config.LABEL_PATH)
+def classification_task(unique_id, classification_types=["sentiment"]):
+    service = ClassificationService()
+    file_service = service.file_service
+    sentiment_model = service.sentiment_model
 
+    filename = file_service.get_original_filename(unique_id)
     stored_filename = f"{unique_id}"
     file_path = os.path.join(Config.UPLOAD_FOLDER, stored_filename)
     comments = file_service.read_comments(file_path)
 
     classified_data = []
-    for comment in comments:
+    for idx, comment in enumerate(comments):
         result = {"comment": comment}
 
         if "sentiment" in classification_types:
@@ -36,6 +38,6 @@ def classify_comments(unique_id, original_filename, classification_types=["senti
         classified_data.append(result)
 
     _, output_filename = file_service.save_classified_data(
-        classified_data, unique_id, original_filename
+        classified_data, unique_id, filename
     )
     return output_filename
