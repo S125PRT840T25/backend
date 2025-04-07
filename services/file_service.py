@@ -17,18 +17,20 @@ class FileService:
         filename = secure_filename(file.filename)
         unique_id = str(uuid.uuid4())
         stored_filename = f"{unique_id}"
-        
+
+        # todo: use sha256 and file size to check if file with came content has uploaded already.
         old_file = self.db_service.get_filename(unique_id)
         if old_file:
             self.db_service.delete_file_record()
-        
+
         file_path = os.path.join(self.upload_folder, stored_filename)
-        file.save(file_path, buffer_size = 128 * 1024)
+        file.save(file_path, buffer_size=128 * 1024)
         file.close()
-        self.db_service.save_file_record(unique_id, filename)
+        size = os.path.getsize(file_path)
+        self.db_service.save_file_record(unique_id, filename, size)
         return file_path, unique_id
 
-    def read_comments(self, file_path, column='comment'):
+    def read_comments(self, file_path, column="comment"):
         df = pd.read_csv(file_path)
         if column not in df.columns:
             raise ValueError(f"CSV must have a '{column}' column")
@@ -51,4 +53,6 @@ class FileService:
             os.remove(upload_file)
         if os.path.exists(output_file):
             os.remove(output_file)
-            
+
+    def get_state(self, unique_id):
+        self.db_service.get_file_state(unique_id)
