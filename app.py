@@ -1,6 +1,6 @@
 from flask import Flask, request, jsonify, send_from_directory, render_template
 from flask_cors import CORS
-from services.classification import ClassificationService, celery, classify_comments
+from services.classification import ClassificationService, celery, classification_task
 from utils.config import Config
 
 app = Flask(__name__)
@@ -30,7 +30,7 @@ def upload_file():
 
     try:
         file_path, unique_id = file_service.save_uploaded_file(file)
-        task = classify_comments.delay(unique_id, file.filename)
+        task = classification_task.apply_async(args=[unique_id], task_id=unique_id)
         return jsonify({"task_id": task.id}), 202
     except Exception as e:
         app.logger.error(f"error: {str(e)}")
@@ -42,7 +42,7 @@ def upload_file():
 
 @app.route("/api/task/<task_id>", methods=["GET"])
 def get_task_status(task_id):
-    task = classify_comments.AsyncResult(task_id)
+    task = classification_task.AsyncResult(task_id)
     if task.state == "PENDING":
         return jsonify({"status": "Pending"}), 202
     elif task.state == "SUCCESS":
