@@ -16,8 +16,9 @@ class ClassificationService:
         self.sentiment_model = SentimentModel(Config.MODEL_PATH, Config.LABEL_PATH)
 
 
-@celery.task
-def classification_task(unique_id, classification_types=["sentiment"]):
+@celery.task(bind=True)
+def classification_task(self, unique_id, classification_types=["sentiment"]):
+    self.update_state(state="PREPROCESSING")
     service = ClassificationService()
     file_service = service.file_service
     sentiment_model = service.sentiment_model
@@ -26,17 +27,22 @@ def classification_task(unique_id, classification_types=["sentiment"]):
     stored_filename = f"{unique_id}"
     file_path = os.path.join(Config.UPLOAD_FOLDER, stored_filename)
     comments = file_service.read_comments(file_path)
-
+    total = len(comments)
+    self.update_state(
+        state="PROCESSING",
+        meta={"current": 0, "total": total},
+    )
     classified_data = []
     for idx, comment in enumerate(comments):
         result = {"comment": comment}
-
+        self.update_state(meta={"current": idx})
         if "sentiment" in classification_types:
             sentiment = sentiment_model.predict(comment)
             result["sentiment"] = sentiment
 
         classified_data.append(result)
 
+    self.update_state(state="POSTPROCESS")
     _, output_filename = file_service.save_classified_data(
         classified_data, unique_id, filename
     )
