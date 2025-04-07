@@ -21,7 +21,7 @@ class FileService:
         # todo: use sha256 and file size to check if file with came content has uploaded already.
         old_file = self.db_service.get_filename(unique_id)
         if old_file:
-            self.db_service.delete_file_record()
+            self.db_service.delete_record(unique_id)
 
         file_path = os.path.join(self.upload_folder, stored_filename)
         file.save(file_path, buffer_size=128 * 1024)

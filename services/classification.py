@@ -29,7 +29,7 @@ def classification_task(self, unique_id, classification_types=["sentiment"]):
     file_path = os.path.join(Config.UPLOAD_FOLDER, stored_filename)
     comments = file_service.read_comments(file_path)
     total = len(comments)
-    file_service.set_state(unique_id, 2)
+    file_service.set_state(unique_id, "processing")
     self.update_state(
         state="PROCESSING",
         meta={"current": 0, "total": total},
@@ -50,5 +50,5 @@ def classification_task(self, unique_id, classification_types=["sentiment"]):
     _, output_filename = file_service.save_classified_data(
         classified_data, unique_id, filename
     )
-    file_service.set_state(unique_id, 3)
+    file_service.set_state(unique_id, "success")
     return output_filename
