@@ -30,9 +30,10 @@ def upload_file():
         return jsonify({"error": "File must be a CSV"}), 400
 
     try:
-        file_path, unique_id = file_service.save_uploaded_file(file)
-        task = classification_task.apply_async(args=[unique_id], task_id=unique_id)
-        return jsonify({"task_id": task.id}), 202
+        unique_id, old_id = file_service.save_uploaded_file(file)
+        if not old_id:
+            task = classification_task.apply_async(args=[unique_id], task_id=unique_id)
+        return jsonify({"task_id": unique_id}), 202
     except Exception as e:
         app.logger.error(f"error: {str(e)}")
         if app.debug:
@@ -43,7 +44,10 @@ def upload_file():
 
 @app.route("/api/task/<id>", methods=["GET"])
 def get_task_status(id):
-    state = file_service.get_state(id)
+    original_id = file_service.get_original_id(id)
+    if not original_id:
+        original_id = id
+    state = file_service.get_state(original_id)
     if not state:
         return jsonify({"status": "Invalid"}), 404
     if state == "success":
@@ -58,7 +62,7 @@ def get_task_status(id):
         )
     elif state == "pending":
         return jsonify({"status": "Pending"}), 202
-    task = classification_task.AsyncResult(id)
+    task = classification_task.AsyncResult(original_id)
     if task.state == "PENDING":
         return jsonify({"status": "Pending"}), 202
     elif task.state == "PROCESSING":
@@ -86,7 +90,7 @@ def download_file(id):
         return jsonify({"error": "File not found"}), 404
     return send_from_directory(
         Config.OUTPUT_FOLDER,
-        id,
+        file_service.get_hash(id),
         as_attachment=True,
         download_name=f"processed_{original_filename}",
     )

@@ -33,6 +33,8 @@ class DBService:
             #     self.migrate_to_v1()
             if version < 2:
                 self.migrate_to_v2()
+            if version < 3:
+                self.migrate_to_v3()
 
     def create_tables(self):
         cursor = self.conn.cursor()
@@ -50,33 +52,69 @@ class DBService:
                 ('processing'),
                 ('success');
             
+            -- create hash table
+            CREATE TABLE IF NOT EXISTS hashs (
+                hash_id INTEGER PRIMARY KEY,
+                hash TEXT UNIQUE,
+                size INTEGER
+            );
+            
             -- create main table
-            CREATE TABLE IF NOT EXISTS file_records (
+            CREATE TABLE IF NOT EXISTS records (
+                u_id TEXT PRIMARY KEY,
+                filename TEXT,
+                upload_time REAL,
+                state_id INTEGER,
+                hash_id INTEGER,
+                FOREIGN KEY (state_id) REFERENCES states(state_id),
+                FOREIGN KEY (hash_id) REFERENCES hashs(hash_id)
+            );
+            
+            -- update database version
+            UPDATE schema_version SET version = 3 WHERE id = 1;
+            """
+        )
+        self.conn.commit()
+
+    def migrate_to_v3(self):
+        cursor = self.conn.cursor()
+        cursor.executescript(
+            """
+            -- rename table
+            ALTER TABLE IF EXISTS file_records RENAME TO records;
+            
+            -- create the file hash table
+            CREATE TABLE IF NOT EXISTS hashs (
+                hash_id INTEGER PRIMARY KEY,
+                hash TEXT UNIQUE,
+                size INTEGER
+            );
+            
+            -- create new temporary main table
+            CREATE TABLE records_new (
                 u_id TEXT PRIMARY KEY,
                 filename TEXT,
                 upload_time REAL,
                 size INTEGER,
                 state_id INTEGER,
-                FOREIGN KEY (state_id) REFERENCES states(state_id)
+                hash_id INTEGER,
+                FOREIGN KEY (state_id) REFERENCES states(state_id),
+                FOREIGN KEY (hash_id) REFERENCES hashs(hash_id)
             );
+            -- copy data from old table
+            INSERT INTO records_new (u_id, filename, upload_time, size, state_id)
+            SELECT u_id, filename, upload_time, size, 3 FROM records;
+            -- drop old table
+            DROP TABLE records;
+            -- rename temp table
+            ALTER TABLE records_new RENAME TO records;
+            
+            -- update database version
+            UPDATE schema_version SET version = 3 WHERE id = 1;
             """
         )
-        cursor.execute("UPDATE schema_version SET version = 2 WHERE id = 1")
         self.conn.commit()
-
-    # def migrate_to_v1(self):
-    #     cursor = self.conn.cursor()
-    #     cursor.execute(
-    #         """
-    #         CREATE TABLE IF NOT EXISTS file_records (
-    #             u_id TEXT PRIMARY KEY,
-    #             filename TEXT,
-    #             upload_time REAL
-    #         )
-    #         """
-    #     )
-    #     cursor.execute("UPDATE schema_version SET version = 1 WHERE id = 1")
-    #     self.conn.commit()
+        cursor.close()
 
     def migrate_to_v2(self):
         cursor = self.conn.cursor()
@@ -105,16 +143,32 @@ class DBService:
             );
             -- copy data from old table
             INSERT INTO file_records_new (u_id, filename, upload_time, state_id)
-            SELECT u_id, filename, upload_time, 3 from file_records;
+            SELECT u_id, filename, upload_time, 3 FROM file_records;
             -- drop old table
             DROP TABLE file_records;
             -- rename temp table
             ALTER TABLE file_records_new RENAME TO file_records;
+            
+            -- update database version
+            UPDATE schema_version SET version = 2 WHERE id = 1;
             """
         )
-        cursor.execute("UPDATE schema_version SET version = 2 WHERE id = 1")
         self.conn.commit()
         cursor.close()
+
+    # def migrate_to_v1(self):
+    #     cursor = self.conn.cursor()
+    #     cursor.execute(
+    #         """
+    #         CREATE TABLE IF NOT EXISTS file_records (
+    #             u_id TEXT PRIMARY KEY,
+    #             filename TEXT,
+    #             upload_time REAL
+    #         )
+    #         """
+    #     )
+    #     cursor.execute("UPDATE schema_version SET version = 1 WHERE id = 1")
+    #     self.conn.commit()
 
     def get_current_version(self):
         cursor = self.conn.cursor()
@@ -123,23 +177,57 @@ class DBService:
         cursor.close()
         return version
 
-    def save_file_record(self, u_id, filename, size):
+    def save_file_record(self, u_id, filename, hash_id, hash_value, size):
         """Save a file's metadata in the database."""
         cursor = self.conn.cursor()
-        cursor.execute(
-            """
-            INSERT OR REPLACE INTO file_records (u_id, filename, upload_time, state_id, size)
-            VALUES (?, ?, ?, ?, ?)
-            """,
-            (u_id, filename, time.time(), 1, size),
-        )
+        if hash_id:
+            cursor.execute(
+                """
+                INSERT OR REPLACE INTO records (u_id, filename, upload_time, state_id, hash_id)
+                VALUES (
+                    ?, ?, ?,
+                    (SELECT state_id FROM states WHERE state_name = 'success'),
+                    ?
+                )
+                """,
+                (u_id, filename, time.time(), hash_id),
+            )
+        else:
+            cursor.execute(
+                """
+                INSERT OR REPLACE INTO hashs (hash, size)
+                VALUES (?, ?)
+                """,
+                (hash_value, size),
+            )
+            cursor.execute(
+                """
+                INSERT OR REPLACE INTO records (u_id, filename, upload_time, state_id, hash_id)
+                VALUES (
+                    ?, ?, ?,
+                    (SELECT state_id FROM states WHERE state_name = 'pending'),
+                    (SELECT hash_id FROM hashs WHERE hash = ?)
+                )
+                """,
+                (u_id, filename, time.time(), hash_value),
+            )
         self.conn.commit()
+
+    def check_hash(self, hash_value, size):
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "SELECT hash_id FROM hashs WHERE hash = ? LIMIT 1",
+            (hash_value,),
+        )
+        result = cursor.fetchone()
+        cursor.close()
+        return result[0] if result else None
 
     def get_filename(self, u_id):
         """Retrieve the filename from the database"""
         cursor = self.conn.cursor()
         cursor.execute(
-            "SELECT filename FROM file_records WHERE u_id = ?",
+            "SELECT filename FROM records WHERE u_id = ?",
             (u_id,),
         )
         result = cursor.fetchone()
@@ -149,8 +237,8 @@ class DBService:
     def get_file_state(self, u_id):
         cursor = self.conn.cursor()
         cursor.execute(
-            """SELECT states.state_name FROM states INNER JOIN file_records 
-                ON states.state_id=file_records.state_id AND file_records.u_id = ?""",
+            """SELECT states.state_name FROM states INNER JOIN records 
+                ON states.state_id=records.state_id AND records.u_id = ?""",
             (u_id,),
         )
         result = cursor.fetchone()
@@ -163,14 +251,39 @@ class DBService:
         result = cursor.fetchone()
         if result:
             cursor.execute(
-                "UPDATE file_records SET state_id = ? WHERE u_id = ?",
+                "UPDATE records SET state_id = ? WHERE u_id = ?",
                 (result[0], u_id),
             )
         self.conn.commit()
 
+    def get_file_hash(self, u_id):
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """SELECT hashs.hash FROM hashs INNER JOIN records 
+                ON hashs.hash_id=records.hash_id AND records.u_id = ?""",
+            (u_id,),
+        )
+        result = cursor.fetchone()
+        cursor.close()
+        return result[0] if result else None
+
+    def get_file_id(self, hash_value):
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            SELECT records.u_id FROM records INNER JOIN hashs
+            ON records.hash_id = hashs.hash_id AND hashs.hash = ?
+            ORDER BY records.upload_time LIMIT 1
+            """,
+            (hash_value,),
+        )
+        result = cursor.fetchone()
+        cursor.close()
+        return result[0] if result else None
+
     def delete_record(self, u_id):
         cursor = self.conn.cursor()
-        cursor.execute("DELETE FROM file_records WHERE u_id = ?", (u_id,))
+        cursor.execute("DELETE FROM records WHERE u_id = ?", (u_id,))
         self.conn.commit()
 
     def close(self):
