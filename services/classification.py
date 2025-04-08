@@ -23,9 +23,9 @@ def classification_task(self, unique_id, classification_types=["sentiment"]):
     file_service = service.file_service
     sentiment_model = service.sentiment_model
 
-    filename = file_service.get_original_filename(unique_id)
-    file_service.save_classified_data
-    stored_filename = f"{unique_id}"
+    stored_filename = file_service.get_hash(unique_id)
+    if not stored_filename:
+        raise NameError("Cannot fetch hash file of task", unique_id)
     file_path = os.path.join(Config.UPLOAD_FOLDER, stored_filename)
     comments = file_service.read_comments(file_path)
     total = len(comments)
@@ -47,8 +47,6 @@ def classification_task(self, unique_id, classification_types=["sentiment"]):
 
         classified_data.append(result)
 
-    _, output_filename = file_service.save_classified_data(
-        classified_data, unique_id, filename
-    )
+    file_service.save_classified_data(classified_data, stored_filename)
     file_service.set_state(unique_id, "success")
-    return output_filename
+    return stored_filename
